@@ -1,5 +1,5 @@
 module QuadricMeshSimplification
 
-greet() = print("Hello World!")
+include("simplify.jl")
 
 end # module
