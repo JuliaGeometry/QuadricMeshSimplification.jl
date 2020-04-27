@@ -3,11 +3,16 @@ uuid = "40583700-ce3e-4cc3-8278-dd6140625a01"
 authors = ["Steve Kelly"]
 version = "0.1.0"
 
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 [compat]
 julia = "1"
 
 [extras]
+Meshing = "e6723b4c-ebff-59f1-b4b7-d97aa5274f73"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Test", "Meshing"]
