@@ -43,7 +43,7 @@ mutable struct Vertex{PT}
     tstart::Int
     tcount::Int
     q::SVector{10,Float64}
-    border::Int
+    border::Bool
 end
 
 struct TRef
@@ -62,7 +62,7 @@ Main simplification function
                  more iterations yield higher quality
 
 """
-function simplify_mesh!(invts, infcs, target_count, agressiveness=7, verbose=false)
+function simplify_mesh!(invts, infcs, target_count::Int, agressiveness=7, verbose=false)
     # init
     triangles = Vector{Triangle}(undef,length(infcs))
     vertices = Vector{Vertex{eltype(invts)}}(undef,length(invts))
@@ -71,7 +71,7 @@ function simplify_mesh!(invts, infcs, target_count, agressiveness=7, verbose=fal
         triangles[i]=Triangle(infcs[i],zero(SVector{4,Float64}),false,false,zero(SVector{3,Float64}))
     end
     for i in eachindex(invts)
-        vertices[i]=Vertex(invts[i],0,0,zero(SVector{10,Float64}),0)
+        vertices[i]=Vertex(invts[i],0,0,zero(SVector{10,Float64}),false)
     end
     # main iteration loop
     deleted_triangles=0;
@@ -85,6 +85,7 @@ function simplify_mesh!(invts, infcs, target_count, agressiveness=7, verbose=fal
         triangle_count-deleted_triangles<=target_count && break
 
         # update mesh once in a while
+        @show iteration
         iszero(iteration%5) && update_mesh!(triangles, vertices, refs, iteration)
 
         # clear dirty flag
@@ -107,18 +108,18 @@ function simplify_mesh!(invts, infcs, target_count, agressiveness=7, verbose=fal
             t.deleted && continue
             t.dirty && continue
 
-            for j = 1:4
+            for j = 1:3
                 if t.err[j] < threshold
 
                     i0=t.v[j]
                     v0 = vertices[i0]
-                    i1 = t.v[(j+1)%3] # TODO
+                    i1 = t.v[(j%3)+1]
                     v1 = vertices[i1]
                     # Border check
                     v0.border != v1.border && continue
 
                     # Compute vertex to collapse to
-                    p, e = calculate_error(i0,i1)
+                    e, p = calculate_error(vertices,i0,i1)
                     resize!(deleted0,v0.tcount) # normals temporarily
                     resize!(deleted1,v1.tcount) # normals temporarily
                     # don't remove if flipped
@@ -128,11 +129,11 @@ function simplify_mesh!(invts, infcs, target_count, agressiveness=7, verbose=fal
 
                     # not flipped, so remove edge
                     v0.p = p
-                    v0.q = v1.q+v0.q
+                    v0.q = v1.q .+ v0.q
                     tstart = length(refs)
 
-                    deleted_triangles = update_triangles(i0,v0,deleted0,deleted_triangles)
-                    deleted_triangles = update_triangles(i0,v1,deleted1,deleted_triangles)
+                    deleted_triangles = update_triangles(triangles,vertices,refs,i0,v0,deleted0,deleted_triangles)
+                    deleted_triangles = update_triangles(triangles,vertices,refs,i0,v1,deleted1,deleted_triangles)
 
                     tcount = length(refs) - tstart
 
@@ -156,116 +157,14 @@ function simplify_mesh!(invts, infcs, target_count, agressiveness=7, verbose=fal
     compact_mesh(vertices,triangles)
 end #simplify_mesh()
 
-function simplify_mesh_lossless!(invts, infcs, verbose=false)
-    # init
-    triangles = Vector{Triangle}(undef,length(infcs))
-    vertices = Vector{Vertex}(undef,length(invts))
-
-    ct = 1
-    for i in eachindex(infcs)
-        fc = infcs[i]
-        # prune degenerate faces
-        if fc[1] != fc[2] && fc[1] != fc[3] && fc[2] != fc[3] && fc[1] != fc[2] != fc[3]
-            triangles[ct]=Triangle(infcs[i],zero(SVector{4,Float64}),false,false,zero(SVector{3,Float64}))
-            ct += 1
-        end
-    end
-    for i in eachindex(invts)
-        vertices[i]=Vertex(invts[i],0,0,zero(SVector{10,Float64}),0)
-    end
-
-    # main iteration loop
-    deleted_triangles=0;
-    deleted0 = Bool[]
-    deleted1 = Bool[]
-    refs = TRef[]
-
-    deleted_triangles = 0
-    triangle_count = length(triangles)
-    # int iteration = 0;
-    # loop(iteration,0,100)
-    for iteration in 0:9999
-        # update mesh constantly
-        update_mesh!(triangles, vertices, refs, iteration)
-        # clear dirty flag
-        for i in eachindex(triangles)
-            triangles[i].dirty = false
-        end
-
-        #
-        # All triangles with edges below the threshold will be removed
-        #
-        # The following numbers works well for most models.
-        # If it does not, try to adjust the 3 parameters
-        #
-        threshold = 1e-3 #1.0E-3 EPS
-
-        # remove vertices & mark deleted triangles
-        for i in eachindex(triangles)
-            t = triangles[i]
-            t.err[3] > threshold && continue
-            t.deleted && continue
-            t.dirty && continue
-
-            for j in 1:3
-                if t.err[j] < threshold
-                    i0 = t.v[j]
-                    v0 = vertices[i0]
-                    i1 = t.v[(j%3)+1]
-                    v1 = vertices[i1]
-
-                    # Border check
-                    v0.border != v1.border &&  continue
-
-                    # Compute vertex to collapse to
-                    e, p = calculate_error(vertices, i0, i1)
-
-                    resize!(deleted0, v0.tcount) # normals temporarily
-                    resize!(deleted1, v1.tcount) # normals temporarily
-
-                    # don't remove if flipped
-                    flipped(vertices,triangles,refs,p,i0,i1,v0,v1,deleted0) && continue
-                    flipped(vertices,triangles,refs,p,i1,i0,v1,v0,deleted1) && continue
-
-                    # not flipped, so remove edge
-                    v0.p = p
-                    v0.q += v1.q
-                    tstart = length(refs)
-
-                    deleted_triangles = update_triangles(triangles,vertices,refs,i0,v0,deleted0,deleted_triangles);
-                    deleted_triangles = update_triangles(triangles,vertices,refs,i0,v1,deleted1,deleted_triangles);
-
-                    tcount = length(refs)-tstart;
-                    if(tcount<=v0.tcount)
-                        s = v0.tstart
-                        if !iszero(tcount)
-                            for o in 1:tcount
-                                refs[v0.tstart+o] = refs[tstart+o]
-                            end
-                        end
-                    else
-                        # append
-                        v0.tstart = tstart
-                    end
-                    v0.tcount = tcount
-                    break
-                end
-            end
-        end #for each iteration
-        deleted_triangles <= 0 && break
-        deleted_triangles = 0
-    end
-    #clean up mesh
-    compact_mesh(vertices,triangles)
-end #simplify_mesh_lossless()
-
 
 """
 Check if a triangle flips when this edge is removed
 """
 function flipped(vertices, triangles, refs, p, i0, i1, v0::Vertex, v1::Vertex, deleted::Vector{Bool})
-    for k in 1:(v0.tcount-1)
+    for k in 1:v0.tcount
         t=triangles[refs[v0.tstart+k].tid]
+
         t.deleted && continue
 
         s=refs[v0.tstart+k].tvertex
@@ -289,7 +188,7 @@ end
 # Update triangle connections and edge error after a edge is collapsed
 function update_triangles(triangles, vertices, refs, i0, v::Vertex, deleted, deleted_triangles)
     for k in 1:v.tcount
-        r = refs[v.tstart+k]
+        r = refs[v.tstart+k-1]
         t = triangles[r.tid]
         t.deleted && continue
         if deleted[k]
@@ -312,7 +211,7 @@ function update_triangles(triangles, vertices, refs, i0, v::Vertex, deleted, del
 end
 
 
-function update_mesh!(triangles::Vector{Triangle}, vertices::Vector{Vertex}, refs::Vector{TRef}, iteration)
+function update_mesh!(triangles::Vector{Triangle}, vertices::Vector, refs::Vector{TRef}, iteration)
     if iteration > 0 # compact triangles
         dst = 1
         for i in eachindex(triangles)
@@ -391,7 +290,7 @@ function update_mesh!(triangles::Vector{Triangle}, vertices::Vector{Vertex}, ref
         vids = Int[]
 
         for i in eachindex(vertices)
-            vertices[i].border=0;
+            vertices[i].border = false
         end
 
         for i in eachindex(vertices)
@@ -418,7 +317,7 @@ function update_mesh!(triangles::Vector{Triangle}, vertices::Vector{Vertex}, ref
             end
             for j in eachindex(vcount)
                 if vcount[j] == 1
-                    vertices[vids[j]].border = 1
+                    vertices[vids[j]].border = true
                 end
             end
         end
@@ -451,11 +350,13 @@ function compact_mesh(vertices::Vector{Vertex},triangles::Vector{Triangle})
         end
     end
     for i in eachindex(triangles)
+        @show triangles[i]
+        @show length(vertices), triangles[i].v[1],triangles[i].v[2],triangles[i].v[3]
         triangles[i].v = SVector(vertices[triangles[i].v[1]].tstart,
                                  vertices[triangles[i].v[2]].tstart,
                                  vertices[triangles[i].v[3]].tstart)
     end
-    resize!(vertices,dst)
+    resize!(vertices,dst-1)
 end
 
 """
@@ -469,14 +370,14 @@ end
 """
 Error for one edge
 """
-function calculate_error(vertices::Vector{Vertex}, id_v1::Int, id_v2::Int)
+function calculate_error(vertices::Vector, id_v1::Int, id_v2::Int)
     # compute interpolated vertex
 
     q = vertices[id_v1].q .+ vertices[id_v2].q
     border = vertices[id_v1].border & vertices[id_v2].border
     d = det(q,1, 2, 3, 2, 5, 6, 3, 6, 8)
 
-    if d != 0 && !iszero(border)
+    if !iszero(d) && !border
         # q_delta is invertible
         x = -1/d*(det(q,2, 3, 4, 5, 6, 7, 6, 8, 9)) # vx = A41/det(q_delta)
         y =  1/d*(det(q,1, 3, 4, 2, 6, 7, 3, 8, 9)) # vy = A42/det(q_delta)
@@ -500,7 +401,7 @@ function calculate_error(vertices::Vector{Vertex}, id_v1::Int, id_v2::Int)
             return error4, p3
         end
     end
-    return 0.0, SVector{3,Float64}(0,0,0)
+    return 0.0, zero(SVector{3,Float64})
 end
 
 

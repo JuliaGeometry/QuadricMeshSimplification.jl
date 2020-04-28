@@ -13,6 +13,7 @@ julia = "1"
 [extras]
 Meshing = "e6723b4c-ebff-59f1-b4b7-d97aa5274f73"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 
 [targets]
-test = ["Test", "Meshing"]
+test = ["GeometryBasics", "Test", "Meshing"]
