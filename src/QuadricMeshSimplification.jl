@@ -81,7 +81,7 @@ function simplify_mesh!(invts, infcs, target_count::Int, agressiveness=7, verbos
 
     triangle_count=length(triangles)
 
-    for iteration = 1:100
+    for iteration = 0:100
         triangle_count-deleted_triangles<=target_count && break
 
         # update mesh once in a while
@@ -104,14 +104,14 @@ function simplify_mesh!(invts, infcs, target_count::Int, agressiveness=7, verbos
         # remove vertices & mark deleted triangles
         for i in eachindex(triangles)
             t = triangles[i]
-            t.err[3]>threshold && continue
+            t.err[4]>threshold && continue
             t.deleted && continue
             t.dirty && continue
 
             for j = 1:3
                 if t.err[j] < threshold
 
-                    i0=t.v[j]
+                    i0 = t.v[j]
                     v0 = vertices[i0]
                     i1 = t.v[(j%3)+1]
                     v1 = vertices[i1]
@@ -140,7 +140,11 @@ function simplify_mesh!(invts, infcs, target_count::Int, agressiveness=7, verbos
                     if tcount <= v0.tcount
                         # save ram
                         s = v0.tstart
-                        !iszero(tcount) && (refs[s:(s+tcount)] .= refs[tstart:tcount])
+                        if !iszero(tcount)
+                            for ne in 0:(tcount-1)
+                                refs[s+ne] = refs[tstart+ne]
+                            end
+                        end
                     else
                         # append
                         v0.tstart = tstart
@@ -168,8 +172,8 @@ function flipped(vertices, triangles, refs, p, i0, i1, v0::Vertex, v1::Vertex, d
         t.deleted && continue
 
         s=refs[v0.tstart+k].tvertex
-        id1=t.v[((s+1)%3)+1]
-        id2=t.v[((s+2)%3)+1]
+        id1=t.v[(s%3)+1]
+        id2=t.v[((s+1)%3)+1]
 
         if id1==i1 || id2==i1 # delete ?
             deleted[k] = true
@@ -187,27 +191,34 @@ end
 
 # Update triangle connections and edge error after a edge is collapsed
 function update_triangles(triangles, vertices, refs, i0, v::Vertex, deleted, deleted_triangles)
+    dt = deleted_triangles
     for k in 1:v.tcount
         r = refs[v.tstart+k-1]
         t = triangles[r.tid]
         t.deleted && continue
         if deleted[k]
             t.deleted=true
-            deleted_triangles += 1
+            dt += 1
             continue
         end
         ind = r.tvertex
         tv = t.v
-        t.v = ind == 1 ? SVector(i0,tv[2],tv[3]) : ind == 2 ? SVector(tv[1],i0,tv[3]) : SVector(tv[1],tv[2],i0)
-        t.dirty = true
-        err0, p = calculate_error(vertices, t.v[1], t.v[2])
-        err1, p = calculate_error(vertices, t.v[2], t.v[3])
-        err2, p = calculate_error(vertices, t.v[3], t.v[1])
+        if ind == 1
+            triangles[r.tid].v = SVector(i0,tv[2],tv[3])
+        elseif ind == 2
+            triangles[r.tid].v = SVector(tv[1],i0,tv[3])
+        else
+            triangles[r.tid].v = SVector(tv[1],tv[2],i0)
+        end
+        triangles[r.tid].dirty = true
+        err0, p = calculate_error(vertices, tv[1], tv[2])
+        err1, p = calculate_error(vertices, tv[2], tv[3])
+        err2, p = calculate_error(vertices, tv[3], tv[1])
         err3 = min(err0, err1, err2)
         t.err = SVector{4,Float64}(err0,err1,err2,err3)
-        push!(refs, r)
+        push!(refs, refs[v.tstart+k])
     end
-    deleted_triangles
+    dt
 end
 
 
@@ -261,12 +272,15 @@ function update_mesh!(triangles::Vector{Triangle}, vertices::Vector, refs::Vecto
         vertices[i].tstart = 0
         vertices[i].tcount = 0
     end
+    @show "hello"
     for i in eachindex(triangles)
         for j in 1:3
+            #@show triangles[i].v[j], length(vertices), i, length(triangles)
             vertices[triangles[i].v[j]].tcount += 1
         end
     end
-    tstart = 0
+    @show "exited"
+    tstart = 1
     for i in eachindex(vertices)
         vertices[i].tstart = tstart
         tstart += vertices[i].tcount
@@ -279,8 +293,8 @@ function update_mesh!(triangles::Vector{Triangle}, vertices::Vector, refs::Vecto
         t=triangles[i]
         for j in 1:3
             v=vertices[t.v[j]]
-            refs[v.tstart+v.tcount] = TRef(i, j)
-            v.tcount += 1
+            refs[v.tstart+v.tcount-1] = TRef(i, j)
+            vertices[t.v[j]].tcount += 1
         end
     end
 
@@ -298,7 +312,7 @@ function update_mesh!(triangles::Vector{Triangle}, vertices::Vector, refs::Vecto
             empty!(vcount)
             empty!(vids)
             for j in 1:(v.tcount-1)
-                k = refs[v.tstart+j].tid
+                k = refs[v.tstart+j-1].tid
                 t = triangles[k]
                 for k = 1:3
                     ofs = 0
@@ -325,7 +339,7 @@ function update_mesh!(triangles::Vector{Triangle}, vertices::Vector, refs::Vecto
 end
 
 # Finally compact mesh before exiting
-function compact_mesh(vertices::Vector{Vertex},triangles::Vector{Triangle})
+function compact_mesh(vertices::Vector,triangles::Vector{Triangle})
     dst = 1
     for i in eachindex(vertices)
         vertices[i].tcount=0
