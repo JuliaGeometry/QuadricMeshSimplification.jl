@@ -159,6 +159,16 @@ function simplify_mesh!(invts, infcs, target_count::Int, agressiveness=7, verbos
     end
     # clean up mesh
     compact_mesh(vertices,triangles)
+    resize!(invts, length(vertices))
+    resize!(infcs, length(triangles))
+    for i in eachindex(vertices)
+        invts[i] = vertices[i].p
+    end
+    for i in eachindex(triangles)
+        infcs[i] = triangles[i].v
+    end
+
+    return invts, infcs
 end #simplify_mesh()
 
 
@@ -364,8 +374,8 @@ function compact_mesh(vertices::Vector,triangles::Vector{Triangle})
         end
     end
     for i in eachindex(triangles)
-        @show triangles[i]
-        @show length(vertices), triangles[i].v[1],triangles[i].v[2],triangles[i].v[3]
+        #@show triangles[i]
+        #@show length(vertices), triangles[i].v[1],triangles[i].v[2],triangles[i].v[3]
         triangles[i].v = SVector(vertices[triangles[i].v[1]].tstart,
                                  vertices[triangles[i].v[2]].tstart,
                                  vertices[triangles[i].v[3]].tstart)

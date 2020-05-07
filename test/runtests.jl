@@ -9,10 +9,14 @@ using GeometryBasics
     @testset "Sphere" begin
         sphere(v) = sqrt(sum(v.^2)) - 1
         vts, fcs = isosurface(sphere,MarchingTetrahedra())
-        simplify_mesh!(vts,fcs, length(vts)>>2)
+        @show length(vts), length(fcs)
+        vts, fcs = simplify_mesh!(vts,fcs, length(vts)>>2)
+        @show length(vts), length(fcs)
     end
     @testset "random" begin
         vts, fcs = isosurface(rand(20,20,20),MarchingCubes(0.5))
-        simplify_mesh!(vts,fcs, length(vts)>>2)
+        @show length(vts), length(fcs)
+        vts, fcs = simplify_mesh!(vts,fcs, length(vts)>>2)
+        @show length(vts), length(fcs)
     end
 end
